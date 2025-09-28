@@ -1,118 +1,94 @@
 # 🚀 快速部署指南
 
-## 推荐部署平台
+## 最简单方式：Railway 部署
 
-### 1. Railway (最推荐) ⭐⭐⭐⭐⭐
+### 步骤 1: 准备 GitHub 仓库
+```bash
+# 如果还没有 GitHub 仓库，先创建一个
+git remote add origin https://github.com/your-username/your-repo.git
+git push -u origin main
+```
 
-**优点**: 对 Python 支持最好，部署简单，免费额度大
+### 步骤 2: 部署到 Railway
+1. 访问 https://railway.app
+2. 点击 "Start a New Project"
+3. 选择 "Deploy from GitHub repo"
+4. 连接你的 GitHub 账户
+5. 选择你的仓库
+6. Railway 会自动检测到 Python 项目并部署
 
-**步骤**:
-1. 访问 [Railway](https://railway.app)
-2. 点击 "Deploy from GitHub repo"
-3. 选择仓库: `kexin94yyds/airdrop`
-4. 设置环境变量:
-   ```
-   TWITTER_USERNAME=Kexinyyds
-   TWITTER_PASSWORD=your_password
-   TWITTER_EMAIL=your_email@example.com
-   TWITTER_EMAIL_PASSWORD=your_email_password
-   TWITTER_COOKIES=你的cookies字符串
-   ```
-5. 点击 Deploy
+### 步骤 3: 配置环境变量（可选）
+如果需要代理，在 Railway 项目设置中添加：
+- `TWS_PROXY`: 你的代理地址
 
-### 2. Render ⭐⭐⭐⭐
+## 部署文件说明
 
-**步骤**:
-1. 访问 [Render](https://render.com)
-2. 点击 "New Web Service"
-3. 连接 GitHub 仓库
-4. 设置:
-   - Build Command: `pip install -r requirements.txt`
-   - Start Command: `python app.py`
-5. 添加环境变量（同上）
-6. 点击 Create Web Service
+✅ **已准备的文件：**
+- `realtime_platform.py` - 主应用文件（实时更新版本）
+- `requirements.txt` - Python 依赖
+- `Procfile` - Heroku 配置
+- `railway.json` - Railway 配置
+- `vercel.json` - Vercel 配置
+- `runtime.txt` - Python 版本
 
-### 3. Heroku ⭐⭐⭐
+## 功能特性
 
-**步骤**:
+🎯 **实时更新机制：**
+- 每5分钟自动爬取 @binance 推文
+- 智能筛选空投相关信息
+- SQLite 数据库持久化存储
+- 后台线程运行，不影响 Web 服务
+
+🌐 **Web 界面：**
+- 响应式设计
+- 实时数据展示
+- 搜索和排序功能
+- 统计信息展示
+
+📡 **API 接口：**
+- `GET /` - 主页
+- `GET /api/airdrop-tweets` - 获取空投推文
+- `GET /api/force-update` - 手动触发更新
+
+## 部署后访问
+
+部署成功后，你将获得一个 URL，例如：
+- https://your-app-name.railway.app
+
+访问这个 URL 即可使用平台！
+
+## 其他部署方式
+
+### Heroku 部署
 ```bash
 # 安装 Heroku CLI
+brew install heroku/brew/heroku
+
+# 登录并创建应用
 heroku login
 heroku create your-app-name
+git push heroku main
+heroku ps:scale web=1
+```
 
-# 设置环境变量
-heroku config:set TWITTER_USERNAME=Kexinyyds
-heroku config:set TWITTER_PASSWORD=your_password
-heroku config:set TWITTER_EMAIL=your_email@example.com
-heroku config:set TWITTER_EMAIL_PASSWORD=your_email_password
-heroku config:set TWITTER_COOKIES="你的cookies"
+### Vercel 部署
+```bash
+# 安装 Vercel CLI
+npm install -g vercel
 
 # 部署
-git push heroku main
+vercel --prod
 ```
 
-## 🔧 环境变量说明
+## 监控和维护
 
-### 必需的环境变量:
-```
-TWITTER_USERNAME=Kexinyyds
-TWITTER_PASSWORD=your_password
-TWITTER_EMAIL=your_email@example.com
-TWITTER_EMAIL_PASSWORD=your_email_password
-TWITTER_COOKIES=你的cookies字符串
-```
+- Railway 会自动重启崩溃的应用
+- 查看日志：Railway 项目页面 → Deployments → 查看日志
+- 手动更新：访问 `/api/force-update` 端点
 
-### 可选的环境变量:
-```
-TWS_PROXY=http://your-proxy:port  # 如果需要代理
-UPDATE_INTERVAL=300  # 更新间隔(秒)
-```
+## 注意事项
 
-## 📋 获取 Twitter Cookies
-
-1. 登录 Twitter/X
-2. 按 F12 打开开发者工具
-3. 点击 Application/Storage 标签
-4. 找到 Cookies
-5. 复制所有 cookies 值，格式如:
-   ```
-   auth_token=xxx; ct0=yyy; guest_id=zzz; ...
-   ```
-
-## 🎯 部署后功能
-
-- ✅ 实时爬取 @binance 推文
-- ✅ 智能筛选空投信息
-- ✅ 每5分钟自动更新
-- ✅ 美观的Web界面
-- ✅ 移动端支持
-- ✅ API接口
-
-## 🚨 常见问题
-
-### 1. 部署失败
-- 检查环境变量是否完整
-- 确认 Python 版本兼容性
-- 查看构建日志
-
-### 2. 无法爬取推文
-- 检查 Twitter 账号状态
-- 确认 cookies 有效性
-- 检查网络连接
-
-### 3. 更新不工作
-- 检查 UPDATE_INTERVAL 设置
-- 查看应用日志
-- 确认后台任务运行
-
-## 📞 技术支持
-
-如果遇到问题:
-1. 检查环境变量配置
-2. 查看平台日志
-3. 确认 Twitter 账号状态
-4. 检查网络连接
-
----
-
-**推荐**: 使用 Railway 部署，最简单且稳定！
+1. **免费额度**: Railway 有免费额度，足够个人使用
+2. **代理配置**: 如果在中国大陆，建议配置代理
+3. **数据持久化**: 使用 SQLite 数据库，数据会持久保存
+4. **自动更新**: 平台会自动每5分钟更新一次数据
