@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 """
-简化版 Binance 空投信息平台 - 部署版本
-不依赖 twscrape，使用静态数据演示
+Binance 空投信息平台 - 部署版本
+支持实时爬取和更新
 """
 
+import asyncio
 import json
 import sqlite3
 import time
 import threading
+import os
 from datetime import datetime
 from flask import Flask, render_template, jsonify, request
-import os
+
+# 导入 twscrape
+from twscrape import API
 
 app = Flask(__name__)
 
 # 配置
+PROXY_URL = os.environ.get('TWS_PROXY', None)  # 从环境变量获取代理
 DB_PATH = "airdrop_data.db"
+UPDATE_INTERVAL = int(os.environ.get('UPDATE_INTERVAL', 300))  # 5分钟更新一次
 
 # 空投相关关键词
 AIRDROP_KEYWORDS = [
@@ -29,65 +35,19 @@ AIRDROP_KEYWORDS = [
     'liquidity', 'pool', 'mining', 'yield'
 ]
 
-# 示例数据
-SAMPLE_TWEETS = [
-    {
-        'id': '1971495540191039743',
-        'content': '#Binance is excited to announce the Falcon Finance (FF) HODLer Airdrop – @FalconStable $FF.\n\nBNB Holders, get ready! The Airdrop page will be available on the Binance Airdrop Portal in 24 hours. Plus, this token will be listed on Binance soon!',
-        'url': 'https://x.com/binance/status/1971495540191039743',
-        'date': '2025-09-26T08:42:20+00:00',
-        'likes': 902,
-        'retweets': 196,
-        'replies': 244,
-        'keywords': ['airdrop']
-    },
-    {
-        'id': '1971157525748969513',
-        'content': '#Binance is excited to announce the Mira (MIRA) HODLer Airdrop – @Mira_Network $MIRA.\n\nBNB Holders, get ready! The Airdrop page will be available on the Binance Airdrop Portal in 24 hours. Plus, this token will be listed on Binance soon!',
-        'url': 'https://x.com/binance/status/1971157525748969513',
-        'date': '2025-09-25T10:19:11+00:00',
-        'likes': 2197,
-        'retweets': 412,
-        'replies': 438,
-        'keywords': ['airdrop']
-    },
-    {
-        'id': '1972028471208452474',
-        'content': 'The Hotcoin Futures Festival is now live!\n\nTrade for a chance to win a share of 200,000 WCT + 440,000 $SHELL in rewards.',
-        'url': 'https://x.com/binance/status/1972028471208452474',
-        'date': '2025-09-27T20:00:00+00:00',
-        'likes': 348,
-        'retweets': 61,
-        'replies': 164,
-        'keywords': ['reward', 'rewards', 'trade']
-    },
-    {
-        'id': '1971122552929124440',
-        'content': 'New to crypto and want to grab some BNB?\n\nJoin Binance using the link below and complete KYC to claim up to $10 in BNB — while supplies last.\n\n$300,000 in BNB rewards up for grabs!',
-        'url': 'https://x.com/binance/status/1971122552929124440',
-        'date': '2025-09-25T08:00:12+00:00',
-        'likes': 825,
-        'retweets': 184,
-        'replies': 250,
-        'keywords': ['claim', 'reward', 'rewards']
-    },
-    {
-        'id': '1971303695540421108',
-        'content': 'Complete simple tasks to unlock a share of 255,600 @HoloworldAI HOLO token rewards!',
-        'url': 'https://x.com/binance/status/1971303695540421108',
-        'date': '2025-09-25T20:00:00+00:00',
-        'likes': 387,
-        'retweets': 62,
-        'replies': 75,
-        'keywords': ['reward', 'rewards']
-    }
-]
-
-class SimpleAirdropPlatform:
+class RealtimeAirdropScraper:
     def __init__(self):
+        # 根据环境变量决定是否使用代理
+        if PROXY_URL:
+            self.api = API(proxy=PROXY_URL)
+            print(f"使用代理: {PROXY_URL}")
+        else:
+            self.api = API()
+            print("不使用代理")
+            
         self.db_path = DB_PATH
+        self.last_update = None
         self.init_database()
-        self.load_sample_data()
         
     def init_database(self):
         """初始化数据库"""
@@ -112,19 +72,66 @@ class SimpleAirdropPlatform:
         
         conn.commit()
         conn.close()
+        print("数据库初始化完成")
     
-    def load_sample_data(self):
-        """加载示例数据"""
+    def is_airdrop_related(self, content: str):
+        """判断推文是否与空投相关"""
+        content_lower = content.lower()
+        found_keywords = []
+        
+        for keyword in AIRDROP_KEYWORDS:
+            if keyword in content_lower:
+                found_keywords.append(keyword)
+        
+        return len(found_keywords) > 0, found_keywords
+    
+    async def scrape_binance_tweets(self, limit: int = 50):
+        """爬取 Binance 推文"""
+        try:
+            print(f"开始爬取 @binance 推文，限制 {limit} 条...")
+            tweets = []
+            count = 0
+            
+            async for tweet in self.api.search("from:binance", limit=limit):
+                tweet_data = {
+                    'id': tweet.id,
+                    'content': tweet.rawContent,
+                    'url': tweet.url,
+                    'date': tweet.date.isoformat(),
+                    'likes': tweet.likeCount,
+                    'retweets': tweet.retweetCount,
+                    'replies': tweet.replyCount,
+                    'user': {
+                        'username': tweet.user.username,
+                        'displayname': tweet.user.displayname,
+                        'followers': tweet.user.followersCount
+                    }
+                }
+                tweets.append(tweet_data)
+                count += 1
+                if count % 10 == 0:
+                    print(f"已爬取 {count} 条推文...")
+            
+            print(f"爬取完成，共获取 {len(tweets)} 条推文")
+            return tweets
+        except Exception as e:
+            print(f"爬取推文时出错: {e}")
+            return []
+    
+    def save_tweets_to_db(self, tweets):
+        """保存推文到数据库"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # 检查是否已有数据
-        cursor.execute('SELECT COUNT(*) FROM airdrop_tweets')
-        count = cursor.fetchone()[0]
+        new_count = 0
+        airdrop_count = 0
         
-        if count == 0:
-            # 插入示例数据
-            for tweet in SAMPLE_TWEETS:
+        for tweet in tweets:
+            is_airdrop, keywords = self.is_airdrop_related(tweet['content'])
+            if is_airdrop:
+                airdrop_count += 1
+            
+            try:
                 cursor.execute('''
                     INSERT OR REPLACE INTO airdrop_tweets 
                     (tweet_id, content, url, date, likes, retweets, replies, is_airdrop, keywords)
@@ -137,12 +144,18 @@ class SimpleAirdropPlatform:
                     tweet['likes'],
                     tweet['retweets'],
                     tweet['replies'],
-                    True,
-                    ','.join(tweet['keywords'])
+                    is_airdrop,
+                    ','.join(keywords)
                 ))
+                new_count += 1
+            except sqlite3.IntegrityError:
+                # 推文已存在，跳过
+                pass
         
         conn.commit()
         conn.close()
+        print(f"保存完成: 新增 {new_count} 条推文，其中 {airdrop_count} 条空投相关")
+        return new_count
     
     def get_airdrop_tweets(self, limit: int = 20):
         """从数据库获取空投相关推文"""
@@ -198,11 +211,25 @@ class SimpleAirdropPlatform:
             'airdrop_tweets': airdrop_tweets,
             'today_tweets': today_tweets,
             'airdrop_rate': round((airdrop_tweets / total_tweets * 100), 2) if total_tweets > 0 else 0,
-            'last_update': datetime.now().isoformat()
+            'last_update': self.last_update
         }
+    
+    async def update_tweets(self):
+        """更新推文数据"""
+        print(f"[{datetime.now()}] 开始更新 Binance 推文...")
+        
+        tweets = await self.scrape_binance_tweets(100)
+        if tweets:
+            new_count = self.save_tweets_to_db(tweets)
+            self.last_update = datetime.now()
+            print(f"[{datetime.now()}] 更新完成: {len(tweets)} 条推文, 新增 {new_count} 条")
+            return True
+        else:
+            print(f"[{datetime.now()}] 更新失败: 未获取到推文")
+            return False
 
-# 全局平台实例
-platform = SimpleAirdropPlatform()
+# 全局爬虫实例
+scraper = RealtimeAirdropScraper()
 
 @app.route('/')
 def index():
@@ -213,7 +240,7 @@ def index():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Binance 空投信息平台</title>
+        <title>Binance 空投信息平台 - 实时版</title>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
         <style>
@@ -234,7 +261,7 @@ def index():
                 <div class="navbar-nav ms-auto">
                     <span class="navbar-text">
                         <span class="status-indicator status-online"></span>
-                        <span id="last-update">演示版本</span>
+                        <span id="last-update">实时更新中...</span>
                     </span>
                 </div>
             </div>
@@ -274,11 +301,6 @@ def index():
                         </div>
                     </div>
                 </div>
-            </div>
-            
-            <div class="alert alert-info" role="alert">
-                <i class="fas fa-info-circle"></i>
-                <strong>演示版本</strong> - 这是 Binance 空投信息平台的演示版本，展示最新的空投相关信息。完整版本支持实时爬取功能。
             </div>
             
             <div class="row">
@@ -395,8 +417,8 @@ def index():
 def get_airdrop_tweets():
     """获取空投推文 API"""
     limit = request.args.get('limit', 20, type=int)
-    tweets = platform.get_airdrop_tweets(limit)
-    stats = platform.get_stats()
+    tweets = scraper.get_airdrop_tweets(limit)
+    stats = scraper.get_stats()
     
     return jsonify({
         'success': True,
@@ -404,16 +426,59 @@ def get_airdrop_tweets():
         'stats': stats
     })
 
+@app.route('/api/force-update')
+def force_update():
+    """手动触发更新"""
+    def run_update():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        success = loop.run_until_complete(scraper.update_tweets())
+        loop.close()
+        return success
+    
+    # 在后台线程中运行更新
+    thread = threading.Thread(target=run_update)
+    thread.start()
+    
+    return jsonify({
+        'success': True,
+        'message': '更新已开始，请稍后刷新页面查看结果'
+    })
+
+def background_updater():
+    """后台更新任务"""
+    print(f"后台更新任务启动，更新间隔: {UPDATE_INTERVAL} 秒")
+    
+    while True:
+        try:
+            # 在新的事件循环中运行异步任务
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(scraper.update_tweets())
+            loop.close()
+        except Exception as e:
+            print(f"后台更新出错: {e}")
+        
+        time.sleep(UPDATE_INTERVAL)
+
 if __name__ == '__main__':
+    # 启动后台更新线程
+    update_thread = threading.Thread(target=background_updater, daemon=True)
+    update_thread.start()
+    
     print("🚀 Binance 空投信息平台启动中...")
     print("📊 功能特性:")
-    print("   • 展示 Binance 空投相关信息")
+    print("   • 实时爬取 @binance 推文")
+    print("   • 智能筛选空投相关信息")
     print("   • Web 界面展示")
-    print("   • 演示版本")
+    print("   • 自动更新机制 (每5分钟)")
+    print("   • 数据库存储")
     print()
-    print("🌐 访问地址: http://localhost:8000")
+    print("🌐 访问地址: http://localhost:9000")
+    print("⏰ 更新间隔: 5分钟")
     print("🔄 按 Ctrl+C 停止服务")
     print("-" * 50)
     
     # 启动 Flask 应用
-    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
+    port = int(os.environ.get('PORT', 9000))
+    app.run(debug=False, host='0.0.0.0', port=port)
